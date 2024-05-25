@@ -36,7 +36,29 @@ HINT: There are a possibly a few ways to do this query, but if you're struggling
 "best day" and "worst day"; 
 3) Query the second temp table twice, once for the best day, once for the worst day, 
 with a UNION binding them. */
+SELECT market_date, daily_sales from
 
+(select market_date
+,quantity*cost_to_customer_per_qty as sales 
+,sum(quantity*cost_to_customer_per_qty) as daily_sales
+,rank()over (order by sum(quantity*cost_to_customer_per_qty)) as sales_rank
+
+FROM customer_purchases
+group by market_date)
+where sales_rank = 1 
+
+UNION
+
+SELECT market_date, daily_sales from
+
+(select market_date
+,quantity*cost_to_customer_per_qty as sales 
+,sum(quantity*cost_to_customer_per_qty) as daily_sales
+,rank()over (order by sum(quantity*cost_to_customer_per_qty) DESC) as sales_rank
+
+FROM customer_purchases
+group by market_date)
+where sales_rank = 1
 
 
 -- Cross Join
@@ -50,19 +72,46 @@ Think a bit about the row counts: how many distinct vendors, product names are t
 How many customers are there (y). 
 Before your final group by you should have the product of those two queries (x*y).  */
 
+--why use CROSS JOIN for this practice? CROSS JOIN is great for creating permutations but not calculations....... (y) can easily be queried by count distinct........
+DROP TABLE IF EXISTS number_of_customerssss;
 
+CREATE TEMPORARY TABLE number_of_customerssss AS
+SELECT COUNT(DISTINCT customer_first_name || customer_last_name) AS number_of_customers
+FROM customer;
+
+DROP TABLE IF EXISTS all_products;
+
+CREATE TEMPORARY TABLE all_products AS
+SELECT vendor_id, product_id, SUM(sales) AS total_sales
+FROM (
+    SELECT DISTINCT vendor_id, product_id, original_price, original_price * 5 AS sales
+    FROM vendor_inventory
+) 
+GROUP BY vendor_id, product_id;
+
+SELECT v.vendor_name, p.product_name, ap.total_sales * nc.number_of_customers AS total_5sales_per_product
+FROM all_products ap
+JOIN number_of_customerssss nc
+JOIN vendor v ON v.vendor_id = ap.vendor_id
+JOIN product p ON p.product_id = ap.product_id;
 
 -- INSERT
 /*1.  Create a new table "product_units". 
 This table will contain only products where the `product_qty_type = 'unit'`. 
 It should use all of the columns from the product table, as well as a new column for the `CURRENT_TIMESTAMP`.  
 Name the timestamp column `snapshot_timestamp`. */
+CREATE TABLE product_units as
+SELECT * from product where product_qty_type = 'unit';
+
+ALTER TABLE product_units add snapshot_timestamp;
 
 
 
 /*2. Using `INSERT`, add a new row to the product_units table (with an updated timestamp). 
 This can be any product you desire (e.g. add another record for Apple Pie). */
 
+insert into product_units 
+VALUES (24,'Big Mac','1/4lb',3,'unit',CURRENT_TIMESTAMP);
 
 
 -- DELETE
@@ -70,6 +119,7 @@ This can be any product you desire (e.g. add another record for Apple Pie). */
 
 HINT: If you don't specify a WHERE clause, you are going to have a bad time.*/
 
+DELETE FROM product_units WHERE snapshot_timestamp is NOT NULL;
 
 
 -- UPDATE
@@ -90,3 +140,50 @@ Finally, make sure you have a WHERE statement to update the right row,
 When you have all of these components, you can run the update statement. */
 
 
+
+WITH last_inventory AS (
+    SELECT 
+        market_date, product_id, ROW_NUMBER() OVER (PARTITION BY product_id ORDER BY market_date DESC) AS recency, quantity
+    FROM 
+        vendor_inventory
+),
+
+filtered_last_inventory AS (
+    SELECT 
+        market_date, product_id, quantity
+    FROM 
+        last_inventory
+    WHERE 
+        recency = 1
+),
+
+product_quantity AS (
+    SELECT
+        fli.market_date, fli.product_id, p.product_name, fli.quantity
+    FROM
+        filtered_last_inventory fli
+    LEFT JOIN
+        product p ON fli.product_id = p.product_id
+
+    UNION ALL
+
+    SELECT
+        NULL AS market_date, p.product_id, p.product_name,
+        NULL AS quantity
+    FROM
+        product p
+    LEFT JOIN
+        filtered_last_inventory fli ON p.product_id = fli.product_id
+    WHERE
+        fli.product_id IS NULL
+)
+
+
+UPDATE product_units
+SET current_quantity = (
+    SELECT pq.quantity
+    FROM product_quantity pq
+    WHERE pq.product_id = product_units.product_id
+);
+
+--OMGGGGG this one was so hard, and especially working with DB browser SQLite!!!!!!! no FULL OUTER JOIN!?!?!?!?!
