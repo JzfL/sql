@@ -16,7 +16,11 @@ HINT: keep the syntax the same, but edited the correct components with the strin
 The `||` values concatenate the columns into strings. 
 Edit the appropriate columns -- you're making two edits -- and the NULL rows will be fixed. 
 All the other rows will remain the same.) */
-
+SELECT 
+coalesce (product_name, 'whatever product you desire')
+ || ', ' || coalesce (product_size, '')
+ || ' (' || coalesce(product_qty_type,'unit') || ')'
+FROM product
 
 
 
@@ -29,12 +33,31 @@ You can either display all rows in the customer_purchases table, with the counte
 each new market date for each customer, or select only the unique market dates per customer 
 (without purchase details) and number those visits. 
 HINT: One of these approaches uses ROW_NUMBER() and one uses DENSE_RANK(). */
-
+SELECT product_id,vendor_id, market_date
+,customer_id,quantity,cost_to_customer_per_qty,transaction_time, 
+row_number() over (PARTITION by customer_id) as days_of_visits 
+from customer_purchases
+group by customer_id, market_date
+order by customer_id, market_date;
 
 /* 2. Reverse the numbering of the query from a part so each customer’s most recent visit is labeled 1, 
 then write another query that uses this one as a subquery (or temp table) and filters the results to 
 only the customer’s most recent visit. */
+SELECT product_id,vendor_id, market_date,customer_id,quantity,cost_to_customer_per_qty,transaction_time
 
+FROM
+(SELECT product_id,vendor_id, market_date
+,customer_id,quantity,cost_to_customer_per_qty,transaction_time,
+row_number() over (PARTITION by customer_id ORDER by market_date desc) as recent
+from customer_purchases
+group by customer_id, market_date 
+order by customer_id, market_date)
+
+where recent =1;
 
 /* 3. Using a COUNT() window function, include a value along with each row of the 
 customer_purchases table that indicates how many different times that customer has purchased that product_id. */
+SELECT product_id,vendor_id, market_date
+,customer_id,quantity,cost_to_customer_per_qty,transaction_time,
+count(product_id) over (PARTITION by vendor_id,customer_id order by market_date,transaction_time) as times_purchasing
+from customer_purchases
